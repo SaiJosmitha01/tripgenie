@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tripgenie-backend-placeholder
+  namespace: tripgenie
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tripgenie-backend-placeholder
+  template:
+    metadata:
+      labels:
+        app: tripgenie-backend-placeholder
+    spec:
+      containers:
+        - name: app
+          image: tripgenie/backend-placeholder:0.0.1
+          ports:
+            - containerPort: 8080
