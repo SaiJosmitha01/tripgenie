@@ -28,6 +28,13 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
 
+tripgenie:
+  security:
+    jwt:
+      issuer: tripgenie
+      secret: ${TRIPGENIE_JWT_SECRET:tripgenie-development-secret-key-change-me-minimum-32-bytes}
+      access-token-ttl: PT2H
+
 logging:
   level:
     root: INFO
