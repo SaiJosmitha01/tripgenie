@@ -1,4 +1,9 @@
 spring:
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../../.env[.properties]
+      - optional:file:../../../.env[.properties]
   application:
     name: trip-service
   profiles:
@@ -10,6 +15,10 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
 
 server:
   port: 8083
@@ -27,6 +36,13 @@ management:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+
+tripgenie:
+  security:
+    jwt:
+      issuer: tripgenie
+      secret: ${JWT_SECRET:tripgenie-development-secret-key-change-me-minimum-32-bytes}
+      access-token-ttl: PT2H
 
 logging:
   level:

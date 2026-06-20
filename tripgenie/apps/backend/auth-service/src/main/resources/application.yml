@@ -1,4 +1,9 @@
 spring:
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../../.env[.properties]
+      - optional:file:../../../.env[.properties]
   application:
     name: auth-service
   profiles:
@@ -32,7 +37,7 @@ tripgenie:
   security:
     jwt:
       issuer: tripgenie
-      secret: ${TRIPGENIE_JWT_SECRET:tripgenie-development-secret-key-change-me-minimum-32-bytes}
+      secret: ${JWT_SECRET:tripgenie-development-secret-key-change-me-minimum-32-bytes}
       access-token-ttl: PT2H
 
 logging:

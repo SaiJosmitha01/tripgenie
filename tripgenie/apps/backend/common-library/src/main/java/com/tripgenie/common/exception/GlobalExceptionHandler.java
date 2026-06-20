@@ -2,12 +2,15 @@ package com.tripgenie.common.exception;
 
 import com.tripgenie.common.api.ErrorResponse;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -28,6 +31,22 @@ public class GlobalExceptionHandler {
                 .forEach(error -> errors.put(error.getField(), error.getDefaultMessage()));
         return ResponseEntity.badRequest()
                 .body(ErrorResponse.validation("Request validation failed", HttpStatus.BAD_REQUEST.value(), request.getRequestURI(), errors));
+    }
+
+    @ExceptionHandler(ConstraintViolationException.class)
+    ResponseEntity<ErrorResponse> handleConstraintViolation(ConstraintViolationException exception, HttpServletRequest request) {
+        Map<String, String> errors = new LinkedHashMap<>();
+        exception.getConstraintViolations().forEach(violation ->
+                errors.put(violation.getPropertyPath().toString(), violation.getMessage()));
+        return ResponseEntity.badRequest()
+                .body(ErrorResponse.validation("Request validation failed", HttpStatus.BAD_REQUEST.value(), request.getRequestURI(), errors));
+    }
+
+    @ExceptionHandler({MethodArgumentTypeMismatchException.class, HttpMessageNotReadableException.class})
+    ResponseEntity<ErrorResponse> handleMalformedRequest(Exception exception, HttpServletRequest request) {
+        return ResponseEntity.badRequest()
+                .body(ErrorResponse.of("MALFORMED_REQUEST", "Request contains an invalid value",
+                        HttpStatus.BAD_REQUEST.value(), request.getRequestURI()));
     }
 
     @ExceptionHandler(AccessDeniedException.class)
