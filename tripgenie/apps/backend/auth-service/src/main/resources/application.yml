@@ -1,4 +1,9 @@
 spring:
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../../.env[.properties]
+      - optional:file:../../../.env[.properties]
   application:
     name: auth-service
   profiles:
@@ -27,6 +32,13 @@ management:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+
+tripgenie:
+  security:
+    jwt:
+      issuer: tripgenie
+      secret: ${JWT_SECRET:tripgenie-development-secret-key-change-me-minimum-32-bytes}
+      access-token-ttl: PT2H
 
 logging:
   level:
