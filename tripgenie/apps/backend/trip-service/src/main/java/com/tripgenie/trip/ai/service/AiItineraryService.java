@@ -13,6 +13,7 @@ import com.tripgenie.trip.ai.dto.GenerateItineraryResponse;
 import com.tripgenie.trip.ai.provider.AiProvider;
 import com.tripgenie.trip.domain.AiItineraryGeneration;
 import com.tripgenie.trip.domain.Trip;
+import com.tripgenie.trip.event.TripEventPublisher;
 import com.tripgenie.trip.mapper.TripMapper;
 import com.tripgenie.trip.repository.AiItineraryGenerationRepository;
 import com.tripgenie.trip.repository.TripRepository;
@@ -35,6 +36,7 @@ public class AiItineraryService {
     private final TripMapper tripMapper;
     private final ObjectMapper objectMapper;
     private final AiProperties properties;
+    private final TripEventPublisher tripEventPublisher;
 
     public AiItineraryService(
             TripRepository tripRepository,
@@ -44,7 +46,8 @@ public class AiItineraryService {
             AiItineraryNormalizer normalizer,
             TripMapper tripMapper,
             ObjectMapper objectMapper,
-            AiProperties properties
+            AiProperties properties,
+            TripEventPublisher tripEventPublisher
     ) {
         this.tripRepository = tripRepository;
         this.generationRepository = generationRepository;
@@ -54,6 +57,7 @@ public class AiItineraryService {
         this.tripMapper = tripMapper;
         this.objectMapper = objectMapper;
         this.properties = properties;
+        this.tripEventPublisher = tripEventPublisher;
     }
 
     @Transactional
@@ -92,6 +96,7 @@ public class AiItineraryService {
 
         AiItineraryGeneration generation = generation(providerResponse, itinerary, savedTrip);
         AiItineraryGeneration savedGeneration = generationRepository.save(generation);
+        tripEventPublisher.publishItineraryGenerated(savedTrip, savedGeneration);
         return new GenerateItineraryResponse(
                 savedGeneration.getId(), savedGeneration.getProvider(), savedGeneration.getModel(),
                 savedGeneration.getConfidence(), itinerary.quality().warnings(), savedGeneration.getGeneratedAt(),

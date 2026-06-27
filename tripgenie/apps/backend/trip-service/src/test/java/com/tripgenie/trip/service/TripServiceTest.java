@@ -13,6 +13,7 @@ import com.tripgenie.trip.dto.TripSummaryResponse;
 import com.tripgenie.trip.dto.UpdateBudgetRequest;
 import com.tripgenie.trip.dto.UpdateItineraryRequest;
 import com.tripgenie.trip.dto.UpdateTripRequest;
+import com.tripgenie.trip.event.TripEventPublisher;
 import com.tripgenie.trip.mapper.TripMapper;
 import com.tripgenie.trip.repository.TripRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,6 +45,8 @@ import static org.mockito.Mockito.when;
 class TripServiceTest {
     @Mock
     private TripRepository tripRepository;
+    @Mock
+    private TripEventPublisher tripEventPublisher;
 
     private TripService tripService;
     private UUID userId;
@@ -52,7 +55,7 @@ class TripServiceTest {
 
     @BeforeEach
     void setUp() {
-        tripService = new TripService(tripRepository, new TripMapper());
+        tripService = new TripService(tripRepository, new TripMapper(), tripEventPublisher);
         userId = UUID.randomUUID();
         tripId = UUID.randomUUID();
         trip = trip(userId, tripId);
@@ -74,6 +77,7 @@ class TripServiceTest {
         assertThat(response.status()).isEqualTo(TripStatus.DRAFT);
         assertThat(response.title()).isEqualTo("Japan");
         assertThat(response.destination()).isEqualTo("Tokyo");
+        verify(tripEventPublisher).publishTripCreated(any(Trip.class));
     }
 
     @Test
@@ -103,6 +107,26 @@ class TripServiceTest {
         assertThatThrownBy(() -> tripService.updateTrip(userId, tripId, request))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getCode()).isEqualTo("INVALID_TRIP_STATUS_TRANSITION"));
+    }
+
+    @Test
+    void updateTripPublishesTripUpdatedEvent() {
+        when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip));
+        when(tripRepository.save(any(Trip.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        UpdateTripRequest request = new UpdateTripRequest(
+                "Japan spring",
+                "Kyoto",
+                trip.getStartDate(),
+                trip.getEndDate(),
+                TripStatus.PLANNED,
+                "Temples and food"
+        );
+
+        TripResponse response = tripService.updateTrip(userId, tripId, request);
+
+        assertThat(response.title()).isEqualTo("Japan spring");
+        assertThat(response.status()).isEqualTo(TripStatus.PLANNED);
+        verify(tripEventPublisher).publishTripUpdated(any(Trip.class));
     }
 
     @Test
