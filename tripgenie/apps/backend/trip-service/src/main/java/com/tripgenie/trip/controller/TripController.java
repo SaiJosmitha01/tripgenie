@@ -1,6 +1,9 @@
 package com.tripgenie.trip.controller;
 
 import com.tripgenie.common.api.ApiResponse;
+import com.tripgenie.trip.ai.dto.GenerateItineraryRequest;
+import com.tripgenie.trip.ai.dto.GenerateItineraryResponse;
+import com.tripgenie.trip.ai.service.AiItineraryService;
 import com.tripgenie.trip.domain.TripStatus;
 import com.tripgenie.trip.dto.CreateTripRequest;
 import com.tripgenie.trip.dto.PageResponse;
@@ -45,9 +48,11 @@ import java.util.UUID;
 @Validated
 public class TripController {
     private final TripService tripService;
+    private final AiItineraryService aiItineraryService;
 
-    public TripController(TripService tripService) {
+    public TripController(TripService tripService, AiItineraryService aiItineraryService) {
         this.tripService = tripService;
+        this.aiItineraryService = aiItineraryService;
     }
 
     @PostMapping
@@ -119,6 +124,21 @@ public class TripController {
     ) {
         return ApiResponse.success("Budget updated",
                 tripService.updateBudget(currentUserId(authentication), id, request));
+    }
+
+    @PostMapping("/{id}/generate-itinerary")
+    @Operation(
+            summary = "Generate and save an AI itinerary",
+            description = "Uses the configured AI provider. Existing itinerary content is protected unless "
+                    + "overwriteExisting is explicitly true. Only the authenticated trip owner can generate."
+    )
+    ApiResponse<GenerateItineraryResponse> generateItinerary(
+            JwtAuthenticationToken authentication,
+            @PathVariable UUID id,
+            @Valid @RequestBody GenerateItineraryRequest request
+    ) {
+        return ApiResponse.success("Itinerary generated",
+                aiItineraryService.generate(currentUserId(authentication), id, request));
     }
 
     private UUID currentUserId(JwtAuthenticationToken authentication) {
