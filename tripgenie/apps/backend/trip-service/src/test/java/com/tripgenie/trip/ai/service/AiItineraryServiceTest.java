@@ -11,6 +11,7 @@ import com.tripgenie.trip.domain.AiItineraryGeneration;
 import com.tripgenie.trip.domain.ItineraryDay;
 import com.tripgenie.trip.domain.Trip;
 import com.tripgenie.trip.domain.TripStatus;
+import com.tripgenie.trip.event.TripEventPublisher;
 import com.tripgenie.trip.mapper.TripMapper;
 import com.tripgenie.trip.repository.AiItineraryGenerationRepository;
 import com.tripgenie.trip.repository.TripRepository;
@@ -47,6 +48,8 @@ class AiItineraryServiceTest {
     private AiItineraryGenerationRepository generationRepository;
     @Mock
     private AiProvider aiProvider;
+    @Mock
+    private TripEventPublisher tripEventPublisher;
 
     private AiItineraryService service;
     private UUID ownerId;
@@ -67,7 +70,8 @@ class AiItineraryServiceTest {
                 new AiItineraryNormalizer(),
                 new TripMapper(),
                 objectMapper,
-                properties
+                properties,
+                tripEventPublisher
         );
         ownerId = UUID.randomUUID();
         tripId = UUID.randomUUID();
@@ -94,6 +98,7 @@ class AiItineraryServiceTest {
         assertThat(response.trip().budget().totalAmount()).isEqualByComparingTo("500.00");
         verify(generationRepository).save(org.mockito.ArgumentMatchers.argThat(generation ->
                 generation.getRawResponse().equals(raw) && generation.getTrip() == trip));
+        verify(tripEventPublisher).publishItineraryGenerated(org.mockito.Mockito.eq(trip), any());
     }
 
     @Test

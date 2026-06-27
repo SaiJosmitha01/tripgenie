@@ -18,6 +18,7 @@ import com.tripgenie.trip.dto.TripSummaryResponse;
 import com.tripgenie.trip.dto.UpdateBudgetRequest;
 import com.tripgenie.trip.dto.UpdateItineraryRequest;
 import com.tripgenie.trip.dto.UpdateTripRequest;
+import com.tripgenie.trip.event.TripEventPublisher;
 import com.tripgenie.trip.mapper.TripMapper;
 import com.tripgenie.trip.repository.TripRepository;
 import jakarta.persistence.criteria.Predicate;
@@ -41,10 +42,12 @@ import java.util.UUID;
 public class TripService {
     private final TripRepository tripRepository;
     private final TripMapper tripMapper;
+    private final TripEventPublisher tripEventPublisher;
 
-    public TripService(TripRepository tripRepository, TripMapper tripMapper) {
+    public TripService(TripRepository tripRepository, TripMapper tripMapper, TripEventPublisher tripEventPublisher) {
         this.tripRepository = tripRepository;
         this.tripMapper = tripMapper;
+        this.tripEventPublisher = tripEventPublisher;
     }
 
     @Transactional
@@ -58,7 +61,9 @@ public class TripService {
         trip.setEndDate(request.endDate());
         trip.setDescription(trimToNull(request.description()));
         trip.setStatus(TripStatus.DRAFT);
-        return tripMapper.toResponse(tripRepository.save(trip));
+        Trip savedTrip = tripRepository.save(trip);
+        tripEventPublisher.publishTripCreated(savedTrip);
+        return tripMapper.toResponse(savedTrip);
     }
 
     @Transactional(readOnly = true)
@@ -98,7 +103,9 @@ public class TripService {
         trip.setDescription(trimToNull(request.description()));
         trip.setStatus(request.status());
         validateExistingItineraryDates(trip);
-        return tripMapper.toResponse(tripRepository.save(trip));
+        Trip savedTrip = tripRepository.save(trip);
+        tripEventPublisher.publishTripUpdated(savedTrip);
+        return tripMapper.toResponse(savedTrip);
     }
 
     @Transactional
