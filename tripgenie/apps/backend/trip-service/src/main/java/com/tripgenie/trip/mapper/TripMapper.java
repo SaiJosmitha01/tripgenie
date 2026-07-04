@@ -9,6 +9,7 @@ import com.tripgenie.trip.dto.BudgetCategoryResponse;
 import com.tripgenie.trip.dto.BudgetResponse;
 import com.tripgenie.trip.dto.ItineraryDayResponse;
 import com.tripgenie.trip.dto.ItineraryItemResponse;
+import com.tripgenie.trip.dto.LocationMetadataResponse;
 import com.tripgenie.trip.dto.TripResponse;
 import com.tripgenie.trip.dto.TripSummaryResponse;
 import org.springframework.stereotype.Component;
@@ -69,7 +70,23 @@ public class TripMapper {
                 item.getStartTime(),
                 item.getEndTime(),
                 item.getEstimatedCost(),
-                item.getBookingReference()
+                item.getBookingReference(),
+                toLocationMetadataResponse(item)
+        );
+    }
+
+    public LocationMetadataResponse toLocationMetadataResponse(ItineraryItem item) {
+        if (item.getFormattedAddress() == null && item.getLatitude() == null && item.getLongitude() == null
+                && item.getGooglePlaceId() == null && item.getPlaceRating() == null) {
+            return null;
+        }
+        return new LocationMetadataResponse(
+                item.getLocation(),
+                item.getFormattedAddress(),
+                item.getLatitude(),
+                item.getLongitude(),
+                item.getGooglePlaceId(),
+                item.getPlaceRating()
         );
     }
 

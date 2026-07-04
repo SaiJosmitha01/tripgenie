@@ -54,6 +54,11 @@ tripgenie:
     max-attempts: ${AI_MAX_ATTEMPTS:2}
     connect-timeout: ${AI_CONNECT_TIMEOUT:5s}
     read-timeout: ${AI_READ_TIMEOUT:60s}
+  maps:
+    base-url: ${GOOGLE_MAPS_BASE_URL:https://maps.googleapis.com}
+    api-key: ${GOOGLE_MAPS_API_KEY:}
+    connect-timeout: ${GOOGLE_MAPS_CONNECT_TIMEOUT:5s}
+    read-timeout: ${GOOGLE_MAPS_READ_TIMEOUT:20s}
   security:
     jwt:
       issuer: tripgenie
