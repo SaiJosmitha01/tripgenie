@@ -37,6 +37,21 @@ public class ItineraryItem extends AuditableEntity {
     @Column(length = 180)
     private String location;
 
+    @Column(name = "formatted_address", length = 500)
+    private String formattedAddress;
+
+    @Column(name = "latitude", precision = 10, scale = 7)
+    private BigDecimal latitude;
+
+    @Column(name = "longitude", precision = 10, scale = 7)
+    private BigDecimal longitude;
+
+    @Column(name = "google_place_id", length = 160)
+    private String googlePlaceId;
+
+    @Column(name = "place_rating", precision = 3, scale = 2)
+    private BigDecimal placeRating;
+
     @Column(name = "start_time")
     private LocalTime startTime;
 
@@ -87,6 +102,46 @@ public class ItineraryItem extends AuditableEntity {
 
     public void setLocation(String location) {
         this.location = location;
+    }
+
+    public String getFormattedAddress() {
+        return formattedAddress;
+    }
+
+    public void setFormattedAddress(String formattedAddress) {
+        this.formattedAddress = formattedAddress;
+    }
+
+    public BigDecimal getLatitude() {
+        return latitude;
+    }
+
+    public void setLatitude(BigDecimal latitude) {
+        this.latitude = latitude;
+    }
+
+    public BigDecimal getLongitude() {
+        return longitude;
+    }
+
+    public void setLongitude(BigDecimal longitude) {
+        this.longitude = longitude;
+    }
+
+    public String getGooglePlaceId() {
+        return googlePlaceId;
+    }
+
+    public void setGooglePlaceId(String googlePlaceId) {
+        this.googlePlaceId = googlePlaceId;
+    }
+
+    public BigDecimal getPlaceRating() {
+        return placeRating;
+    }
+
+    public void setPlaceRating(BigDecimal placeRating) {
+        this.placeRating = placeRating;
     }
 
     public LocalTime getStartTime() {

@@ -6,12 +6,14 @@ import com.tripgenie.trip.ai.dto.GenerateItineraryResponse;
 import com.tripgenie.trip.ai.service.AiItineraryService;
 import com.tripgenie.trip.domain.TripStatus;
 import com.tripgenie.trip.dto.CreateTripRequest;
+import com.tripgenie.trip.dto.LocationEnrichmentResponse;
 import com.tripgenie.trip.dto.PageResponse;
 import com.tripgenie.trip.dto.TripResponse;
 import com.tripgenie.trip.dto.TripSummaryResponse;
 import com.tripgenie.trip.dto.UpdateBudgetRequest;
 import com.tripgenie.trip.dto.UpdateItineraryRequest;
 import com.tripgenie.trip.dto.UpdateTripRequest;
+import com.tripgenie.trip.location.service.LocationEnrichmentService;
 import com.tripgenie.trip.service.TripService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -49,10 +51,14 @@ import java.util.UUID;
 public class TripController {
     private final TripService tripService;
     private final AiItineraryService aiItineraryService;
+    private final LocationEnrichmentService locationEnrichmentService;
 
-    public TripController(TripService tripService, AiItineraryService aiItineraryService) {
+    public TripController(TripService tripService,
+                          AiItineraryService aiItineraryService,
+                          LocationEnrichmentService locationEnrichmentService) {
         this.tripService = tripService;
         this.aiItineraryService = aiItineraryService;
+        this.locationEnrichmentService = locationEnrichmentService;
     }
 
     @PostMapping
@@ -139,6 +145,21 @@ public class TripController {
     ) {
         return ApiResponse.success("Itinerary generated",
                 aiItineraryService.generate(currentUserId(authentication), id, request));
+    }
+
+    @PostMapping("/{id}/enrich-locations")
+    @Operation(
+            summary = "Enrich itinerary items with location metadata",
+            description = "Resolves itinerary item place names through the configured maps provider and stores "
+                    + "formatted address, coordinates, Google place id, and rating when available. Only the "
+                    + "authenticated trip owner can enrich locations."
+    )
+    ApiResponse<LocationEnrichmentResponse> enrichLocations(
+            JwtAuthenticationToken authentication,
+            @PathVariable UUID id
+    ) {
+        return ApiResponse.success("Locations enriched",
+                locationEnrichmentService.enrichTrip(currentUserId(authentication), id));
     }
 
     private UUID currentUserId(JwtAuthenticationToken authentication) {

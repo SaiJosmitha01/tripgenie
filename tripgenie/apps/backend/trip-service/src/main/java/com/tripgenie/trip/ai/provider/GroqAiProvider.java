@@ -5,6 +5,7 @@ import com.tripgenie.common.exception.BusinessException;
 import com.tripgenie.trip.ai.config.AiProperties;
 import com.tripgenie.trip.ai.dto.AiGenerationContext;
 import com.tripgenie.trip.ai.dto.AiProviderResponse;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -56,7 +57,7 @@ public class GroqAiProvider implements AiProvider {
     private final RestClient restClient;
     private final AiProperties properties;
 
-    public GroqAiProvider(RestClient groqRestClient, AiProperties properties) {
+    public GroqAiProvider(@Qualifier("groqRestClient") RestClient groqRestClient, AiProperties properties) {
         this.restClient = groqRestClient;
         this.properties = properties;
     }
