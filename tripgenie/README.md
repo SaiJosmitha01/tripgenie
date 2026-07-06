@@ -73,6 +73,49 @@ Validate the Compose file:
 docker compose -f infra/docker/docker-compose.yml config
 ```
 
+## Observability, Caching, and Resilience
+
+Trip service uses Redis-backed Spring caching for read-heavy backend paths:
+
+- `tripById`: owned trip detail responses, keyed as `user:{userId}:trip:{tripId}`
+- `tripLists`: authenticated user's trip list queries, keyed by user id, filters, page, size, and sort
+- `placeResolutions`: successful Google Maps place lookups, keyed by normalized place query
+
+Cache entries are evicted when trip details, itineraries, budgets, AI-generated itineraries, or enriched location metadata change. JWTs, API keys, and secrets are never cached.
+
+Runtime cache configuration:
+
+- `REDIS_HOST`: Redis host, default `localhost`
+- `REDIS_PORT`: Redis port, default `6379`
+- `REDIS_PASSWORD`: optional Redis password
+- `REDIS_TIMEOUT`: Redis command timeout, default `2s`
+- `TRIP_CACHE_TTL`: trip detail cache TTL, default `10m`
+- `TRIP_LIST_CACHE_TTL`: trip list cache TTL, default `5m`
+- `PLACE_RESOLUTION_CACHE_TTL`: Google Maps place cache TTL, default `7d`
+
+Every backend request supports `X-Correlation-Id`. If the caller sends the header, TripGenie keeps it; otherwise a UUID is generated. The same value is returned in the response header and added to application logs through MDC as `correlationId`.
+
+Trip service external client resilience settings:
+
+- `AI_CONNECT_TIMEOUT`: Groq connect timeout, default `5s`
+- `AI_READ_TIMEOUT`: Groq read timeout, default `60s`
+- `AI_RETRY_ATTEMPTS`: transient Groq retry attempts, default `2`
+- `GOOGLE_MAPS_CONNECT_TIMEOUT`: Google Maps connect timeout, default `5s`
+- `GOOGLE_MAPS_READ_TIMEOUT`: Google Maps read timeout, default `20s`
+- `GOOGLE_MAPS_RETRY_ATTEMPTS`: transient Google Maps retry attempts, default `2`
+
+Transient 5xx, 429, and network access failures are retried. Validation, missing configuration, and 4xx authentication or caller errors are not retried.
+
+Useful local trip-service health and metrics endpoints:
+
+- `http://localhost:8083/actuator/health`
+- `http://localhost:8083/actuator/health/liveness`
+- `http://localhost:8083/actuator/health/readiness`
+- `http://localhost:8083/actuator/metrics`
+- `http://localhost:8083/actuator/prometheus`
+
+The trip service emits Micrometer timers for trip CRUD operations, AI itinerary generation, and Google Maps enrichment.
+
 ## Event-Driven Notifications
 
 TripGenie uses Kafka for trip and itinerary notification events.

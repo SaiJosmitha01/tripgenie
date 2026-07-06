@@ -1,6 +1,8 @@
 package com.tripgenie.trip.location.service;
 
 import com.tripgenie.common.exception.BusinessException;
+import com.tripgenie.trip.cache.TripCacheNames;
+import com.tripgenie.trip.cache.TripCacheService;
 import com.tripgenie.trip.domain.ItineraryDay;
 import com.tripgenie.trip.domain.ItineraryItem;
 import com.tripgenie.trip.domain.Trip;
@@ -9,11 +11,13 @@ import com.tripgenie.trip.location.dto.PlaceResolution;
 import com.tripgenie.trip.location.provider.MapsProvider;
 import com.tripgenie.trip.mapper.TripMapper;
 import com.tripgenie.trip.repository.TripRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -42,7 +46,13 @@ class LocationEnrichmentServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new LocationEnrichmentService(tripRepository, mapsProvider, new TripMapper());
+        service = new LocationEnrichmentService(
+                tripRepository,
+                mapsProvider,
+                new TripMapper(),
+                cacheService(),
+                new SimpleMeterRegistry()
+        );
         userId = UUID.randomUUID();
         tripId = UUID.randomUUID();
         item = itineraryItem(UUID.randomUUID(), "Louvre Museum", "Paris");
@@ -95,6 +105,27 @@ class LocationEnrichmentServiceTest {
     }
 
     @Test
+    void enrichTripCachesSuccessfulPlaceResolution() {
+        PlaceResolution resolution = new PlaceResolution(
+                "Musee du Louvre",
+                "Rue de Rivoli, 75001 Paris, France",
+                new BigDecimal("48.8606111"),
+                new BigDecimal("2.3376440"),
+                "ChIJmQJIxlVv5kcRwsnV4W7dY3I",
+                new BigDecimal("4.70")
+        );
+        when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip));
+        when(mapsProvider.providerName()).thenReturn("google");
+        when(mapsProvider.resolvePlace("Paris")).thenReturn(Optional.of(resolution));
+
+        service.enrichTrip(userId, tripId);
+        item.setLocation("Paris");
+        service.enrichTrip(userId, tripId);
+
+        verify(mapsProvider).resolvePlace("Paris");
+    }
+
+    @Test
     void enrichTripRejectsNonOwner() {
         when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip));
 
@@ -129,5 +160,13 @@ class LocationEnrichmentServiceTest {
         value.setTitle(title);
         value.setLocation(location);
         return value;
+    }
+
+    private TripCacheService cacheService() {
+        return new TripCacheService(new ConcurrentMapCacheManager(
+                TripCacheNames.TRIP_BY_ID,
+                TripCacheNames.TRIP_LISTS,
+                TripCacheNames.PLACE_RESOLUTIONS
+        ));
     }
 }

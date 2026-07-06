@@ -2,6 +2,7 @@ package com.tripgenie.trip.service;
 
 import com.tripgenie.common.exception.BusinessException;
 import com.tripgenie.common.exception.NotFoundException;
+import com.tripgenie.trip.cache.TripCacheService;
 import com.tripgenie.trip.domain.Budget;
 import com.tripgenie.trip.domain.BudgetCategory;
 import com.tripgenie.trip.domain.ItineraryDay;
@@ -21,6 +22,8 @@ import com.tripgenie.trip.dto.UpdateTripRequest;
 import com.tripgenie.trip.event.TripEventPublisher;
 import com.tripgenie.trip.mapper.TripMapper;
 import com.tripgenie.trip.repository.TripRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -43,32 +46,44 @@ public class TripService {
     private final TripRepository tripRepository;
     private final TripMapper tripMapper;
     private final TripEventPublisher tripEventPublisher;
+    private final TripCacheService tripCacheService;
+    private final MeterRegistry meterRegistry;
 
-    public TripService(TripRepository tripRepository, TripMapper tripMapper, TripEventPublisher tripEventPublisher) {
+    public TripService(TripRepository tripRepository,
+                       TripMapper tripMapper,
+                       TripEventPublisher tripEventPublisher,
+                       TripCacheService tripCacheService,
+                       MeterRegistry meterRegistry) {
         this.tripRepository = tripRepository;
         this.tripMapper = tripMapper;
         this.tripEventPublisher = tripEventPublisher;
+        this.tripCacheService = tripCacheService;
+        this.meterRegistry = meterRegistry;
     }
 
     @Transactional
     public TripResponse createTrip(UUID userId, CreateTripRequest request) {
-        validateDateRange(request.startDate(), request.endDate());
-        Trip trip = new Trip();
-        trip.setOwnerId(userId);
-        trip.setTitle(request.title().trim());
-        trip.setDestination(request.destination().trim());
-        trip.setStartDate(request.startDate());
-        trip.setEndDate(request.endDate());
-        trip.setDescription(trimToNull(request.description()));
-        trip.setStatus(TripStatus.DRAFT);
-        Trip savedTrip = tripRepository.save(trip);
-        tripEventPublisher.publishTripCreated(savedTrip);
-        return tripMapper.toResponse(savedTrip);
+        return recordTripCrud("create", () -> {
+            validateDateRange(request.startDate(), request.endDate());
+            Trip trip = new Trip();
+            trip.setOwnerId(userId);
+            trip.setTitle(request.title().trim());
+            trip.setDestination(request.destination().trim());
+            trip.setStartDate(request.startDate());
+            trip.setEndDate(request.endDate());
+            trip.setDescription(trimToNull(request.description()));
+            trip.setStatus(TripStatus.DRAFT);
+            Trip savedTrip = tripRepository.save(trip);
+            tripEventPublisher.publishTripCreated(savedTrip);
+            tripCacheService.evictTripLists();
+            return tripMapper.toResponse(savedTrip);
+        });
     }
 
     @Transactional(readOnly = true)
     public TripResponse getTrip(UUID userId, UUID tripId) {
-        return tripMapper.toResponse(findOwnedTrip(userId, tripId));
+        return recordTripCrud("get", () ->
+                tripCacheService.getTrip(userId, tripId, () -> tripMapper.toResponse(findOwnedTrip(userId, tripId))));
     }
 
     @Transactional(readOnly = true)
@@ -80,62 +95,89 @@ public class TripService {
             LocalDate startDateTo,
             Pageable pageable
     ) {
-        if (startDateFrom != null && startDateTo != null && startDateTo.isBefore(startDateFrom)) {
-            throw badRequest("INVALID_FILTER_DATE_RANGE", "startDateTo must be on or after startDateFrom");
-        }
-        Specification<Trip> specification = tripSpecification(userId, status, destination, startDateFrom, startDateTo);
-        Page<TripSummaryResponse> page = tripRepository.findAll(specification, pageable).map(tripMapper::toSummary);
-        return PageResponse.from(page);
+        return recordTripCrud("list", () -> tripCacheService.listTrips(
+                userId, status, destination, startDateFrom, startDateTo, pageable, () -> {
+                    if (startDateFrom != null && startDateTo != null && startDateTo.isBefore(startDateFrom)) {
+                        throw badRequest("INVALID_FILTER_DATE_RANGE", "startDateTo must be on or after startDateFrom");
+                    }
+                    Specification<Trip> specification =
+                            tripSpecification(userId, status, destination, startDateFrom, startDateTo);
+                    Page<TripSummaryResponse> page = tripRepository.findAll(specification, pageable)
+                            .map(tripMapper::toSummary);
+                    return PageResponse.from(page);
+                }));
     }
 
     @Transactional
     public TripResponse updateTrip(UUID userId, UUID tripId, UpdateTripRequest request) {
-        validateDateRange(request.startDate(), request.endDate());
-        Trip trip = findOwnedTrip(userId, tripId);
-        if (!trip.getStatus().canTransitionTo(request.status())) {
-            throw badRequest("INVALID_TRIP_STATUS_TRANSITION",
-                    "Trip status cannot transition from " + trip.getStatus() + " to " + request.status());
-        }
-        trip.setTitle(request.title().trim());
-        trip.setDestination(request.destination().trim());
-        trip.setStartDate(request.startDate());
-        trip.setEndDate(request.endDate());
-        trip.setDescription(trimToNull(request.description()));
-        trip.setStatus(request.status());
-        validateExistingItineraryDates(trip);
-        Trip savedTrip = tripRepository.save(trip);
-        tripEventPublisher.publishTripUpdated(savedTrip);
-        return tripMapper.toResponse(savedTrip);
+        return recordTripCrud("update", () -> {
+            validateDateRange(request.startDate(), request.endDate());
+            Trip trip = findOwnedTrip(userId, tripId);
+            if (!trip.getStatus().canTransitionTo(request.status())) {
+                throw badRequest("INVALID_TRIP_STATUS_TRANSITION",
+                        "Trip status cannot transition from " + trip.getStatus() + " to " + request.status());
+            }
+            trip.setTitle(request.title().trim());
+            trip.setDestination(request.destination().trim());
+            trip.setStartDate(request.startDate());
+            trip.setEndDate(request.endDate());
+            trip.setDescription(trimToNull(request.description()));
+            trip.setStatus(request.status());
+            validateExistingItineraryDates(trip);
+            Trip savedTrip = tripRepository.save(trip);
+            tripEventPublisher.publishTripUpdated(savedTrip);
+            tripCacheService.evictTrip(userId, tripId);
+            return tripMapper.toResponse(savedTrip);
+        });
     }
 
     @Transactional
     public void deleteTrip(UUID userId, UUID tripId) {
-        tripRepository.delete(findOwnedTrip(userId, tripId));
+        recordTripCrud("delete", () -> {
+            tripRepository.delete(findOwnedTrip(userId, tripId));
+            tripCacheService.evictTrip(userId, tripId);
+            return null;
+        });
     }
 
     @Transactional
     public TripResponse updateItinerary(UUID userId, UUID tripId, UpdateItineraryRequest request) {
-        Trip trip = findOwnedTrip(userId, tripId);
-        validateItinerary(trip, request.days());
-        List<ItineraryDay> days = request.days().stream().map(this::toItineraryDay).toList();
-        trip.replaceItinerary(days);
-        return tripMapper.toResponse(tripRepository.save(trip));
+        return recordTripCrud("update_itinerary", () -> {
+            Trip trip = findOwnedTrip(userId, tripId);
+            validateItinerary(trip, request.days());
+            List<ItineraryDay> days = request.days().stream().map(this::toItineraryDay).toList();
+            trip.replaceItinerary(days);
+            TripResponse response = tripMapper.toResponse(tripRepository.save(trip));
+            tripCacheService.evictTrip(userId, tripId);
+            return response;
+        });
     }
 
     @Transactional
     public TripResponse updateBudget(UUID userId, UUID tripId, UpdateBudgetRequest request) {
-        Trip trip = findOwnedTrip(userId, tripId);
-        validateBudget(request);
-        Budget budget = trip.getBudget();
-        if (budget == null) {
-            budget = new Budget();
-            trip.setBudget(budget);
-        }
-        budget.setCurrency(request.currency().toUpperCase(Locale.ROOT));
-        budget.setTotalAmount(request.totalAmount());
-        budget.setNotes(trimToNull(request.notes()));
-        budget.replaceCategories(request.categories().stream().map(this::toBudgetCategory).toList());
-        return tripMapper.toResponse(tripRepository.save(trip));
+        return recordTripCrud("update_budget", () -> {
+            Trip trip = findOwnedTrip(userId, tripId);
+            validateBudget(request);
+            Budget budget = trip.getBudget();
+            if (budget == null) {
+                budget = new Budget();
+                trip.setBudget(budget);
+            }
+            budget.setCurrency(request.currency().toUpperCase(Locale.ROOT));
+            budget.setTotalAmount(request.totalAmount());
+            budget.setNotes(trimToNull(request.notes()));
+            budget.replaceCategories(request.categories().stream().map(this::toBudgetCategory).toList());
+            TripResponse response = tripMapper.toResponse(tripRepository.save(trip));
+            tripCacheService.evictTrip(userId, tripId);
+            return response;
+        });
+    }
+
+    private <T> T recordTripCrud(String operation, java.util.function.Supplier<T> supplier) {
+        return Timer.builder("tripgenie.trip.crud")
+                .tag("operation", operation)
+                .register(meterRegistry)
+                .record(supplier);
     }
 
     private Trip findOwnedTrip(UUID userId, UUID tripId) {

@@ -11,12 +11,15 @@ import com.tripgenie.trip.ai.dto.AiProviderResponse;
 import com.tripgenie.trip.ai.dto.GenerateItineraryRequest;
 import com.tripgenie.trip.ai.dto.GenerateItineraryResponse;
 import com.tripgenie.trip.ai.provider.AiProvider;
+import com.tripgenie.trip.cache.TripCacheService;
 import com.tripgenie.trip.domain.AiItineraryGeneration;
 import com.tripgenie.trip.domain.Trip;
 import com.tripgenie.trip.event.TripEventPublisher;
 import com.tripgenie.trip.mapper.TripMapper;
 import com.tripgenie.trip.repository.AiItineraryGenerationRepository;
 import com.tripgenie.trip.repository.TripRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,6 +40,8 @@ public class AiItineraryService {
     private final ObjectMapper objectMapper;
     private final AiProperties properties;
     private final TripEventPublisher tripEventPublisher;
+    private final TripCacheService tripCacheService;
+    private final MeterRegistry meterRegistry;
 
     public AiItineraryService(
             TripRepository tripRepository,
@@ -47,7 +52,9 @@ public class AiItineraryService {
             TripMapper tripMapper,
             ObjectMapper objectMapper,
             AiProperties properties,
-            TripEventPublisher tripEventPublisher
+            TripEventPublisher tripEventPublisher,
+            TripCacheService tripCacheService,
+            MeterRegistry meterRegistry
     ) {
         this.tripRepository = tripRepository;
         this.generationRepository = generationRepository;
@@ -58,10 +65,13 @@ public class AiItineraryService {
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.tripEventPublisher = tripEventPublisher;
+        this.tripCacheService = tripCacheService;
+        this.meterRegistry = meterRegistry;
     }
 
     @Transactional
     public GenerateItineraryResponse generate(UUID userId, UUID tripId, GenerateItineraryRequest request) {
+        Timer.Sample sample = Timer.start(meterRegistry);
         Trip trip = findOwnedTrip(userId, tripId);
         if (!trip.getItineraryDays().isEmpty() && !request.overwriteExisting()) {
             throw new BusinessException("ITINERARY_ALREADY_EXISTS",
@@ -97,10 +107,16 @@ public class AiItineraryService {
         AiItineraryGeneration generation = generation(providerResponse, itinerary, savedTrip);
         AiItineraryGeneration savedGeneration = generationRepository.save(generation);
         tripEventPublisher.publishItineraryGenerated(savedTrip, savedGeneration);
-        return new GenerateItineraryResponse(
+        tripCacheService.evictTrip(userId, tripId);
+        GenerateItineraryResponse response = new GenerateItineraryResponse(
                 savedGeneration.getId(), savedGeneration.getProvider(), savedGeneration.getModel(),
                 savedGeneration.getConfidence(), itinerary.quality().warnings(), savedGeneration.getGeneratedAt(),
                 tripMapper.toResponse(savedTrip));
+        sample.stop(Timer.builder("tripgenie.ai.itinerary.generation")
+                .tag("provider", savedGeneration.getProvider())
+                .tag("model", savedGeneration.getModel())
+                .register(meterRegistry));
+        return response;
     }
 
     private Trip findOwnedTrip(UUID userId, UUID tripId) {
