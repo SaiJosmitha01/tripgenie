@@ -1,6 +1,8 @@
 package com.tripgenie.trip.service;
 
 import com.tripgenie.common.exception.BusinessException;
+import com.tripgenie.trip.cache.TripCacheNames;
+import com.tripgenie.trip.cache.TripCacheService;
 import com.tripgenie.trip.domain.Trip;
 import com.tripgenie.trip.domain.TripStatus;
 import com.tripgenie.trip.dto.BudgetCategoryRequest;
@@ -16,11 +18,13 @@ import com.tripgenie.trip.dto.UpdateTripRequest;
 import com.tripgenie.trip.event.TripEventPublisher;
 import com.tripgenie.trip.mapper.TripMapper;
 import com.tripgenie.trip.repository.TripRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -39,6 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -55,7 +60,13 @@ class TripServiceTest {
 
     @BeforeEach
     void setUp() {
-        tripService = new TripService(tripRepository, new TripMapper(), tripEventPublisher);
+        tripService = new TripService(
+                tripRepository,
+                new TripMapper(),
+                tripEventPublisher,
+                cacheService(),
+                new SimpleMeterRegistry()
+        );
         userId = UUID.randomUUID();
         tripId = UUID.randomUUID();
         trip = trip(userId, tripId);
@@ -89,6 +100,17 @@ class TripServiceTest {
                     assertThat(exception.getCode()).isEqualTo("TRIP_ACCESS_DENIED");
                     assertThat(exception.getStatus()).isEqualTo(HttpStatus.FORBIDDEN);
                 });
+    }
+
+    @Test
+    void getTripUsesCacheAfterFirstLoad() {
+        when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip));
+
+        TripResponse first = tripService.getTrip(userId, tripId);
+        TripResponse second = tripService.getTrip(userId, tripId);
+
+        assertThat(second.id()).isEqualTo(first.id());
+        verify(tripRepository).findById(tripId);
     }
 
     @Test
@@ -127,6 +149,26 @@ class TripServiceTest {
         assertThat(response.title()).isEqualTo("Japan spring");
         assertThat(response.status()).isEqualTo(TripStatus.PLANNED);
         verify(tripEventPublisher).publishTripUpdated(any(Trip.class));
+    }
+
+    @Test
+    void updateTripEvictsCachedTrip() {
+        when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip));
+        tripService.getTrip(userId, tripId);
+        when(tripRepository.save(any(Trip.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        UpdateTripRequest request = new UpdateTripRequest(
+                "Japan spring",
+                "Kyoto",
+                trip.getStartDate(),
+                trip.getEndDate(),
+                TripStatus.PLANNED,
+                "Temples and food"
+        );
+
+        tripService.updateTrip(userId, tripId, request);
+        tripService.getTrip(userId, tripId);
+
+        verify(tripRepository, org.mockito.Mockito.times(3)).findById(tripId);
     }
 
     @Test
@@ -216,5 +258,13 @@ class TripServiceTest {
         value.setEndDate(LocalDate.of(2026, 9, 7));
         value.setStatus(TripStatus.DRAFT);
         return value;
+    }
+
+    private TripCacheService cacheService() {
+        return new TripCacheService(new ConcurrentMapCacheManager(
+                TripCacheNames.TRIP_BY_ID,
+                TripCacheNames.TRIP_LISTS,
+                TripCacheNames.PLACE_RESOLUTIONS
+        ));
     }
 }

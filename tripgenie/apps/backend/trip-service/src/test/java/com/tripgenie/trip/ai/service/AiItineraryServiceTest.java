@@ -7,6 +7,8 @@ import com.tripgenie.trip.ai.dto.AiProviderResponse;
 import com.tripgenie.trip.ai.dto.GenerateItineraryRequest;
 import com.tripgenie.trip.ai.dto.GenerateItineraryResponse;
 import com.tripgenie.trip.ai.provider.AiProvider;
+import com.tripgenie.trip.cache.TripCacheNames;
+import com.tripgenie.trip.cache.TripCacheService;
 import com.tripgenie.trip.domain.AiItineraryGeneration;
 import com.tripgenie.trip.domain.ItineraryDay;
 import com.tripgenie.trip.domain.Trip;
@@ -15,6 +17,7 @@ import com.tripgenie.trip.event.TripEventPublisher;
 import com.tripgenie.trip.mapper.TripMapper;
 import com.tripgenie.trip.repository.AiItineraryGenerationRepository;
 import com.tripgenie.trip.repository.TripRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -60,7 +64,7 @@ class AiItineraryServiceTest {
     void setUp() {
         ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
         Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
-        AiProperties properties = new AiProperties(null, "test-key", null, 2,
+        AiProperties properties = new AiProperties(null, "test-key", null, 2, 2,
                 Duration.ofSeconds(1), Duration.ofSeconds(1));
         service = new AiItineraryService(
                 tripRepository,
@@ -71,7 +75,9 @@ class AiItineraryServiceTest {
                 new TripMapper(),
                 objectMapper,
                 properties,
-                tripEventPublisher
+                tripEventPublisher,
+                cacheService(),
+                new SimpleMeterRegistry()
         );
         ownerId = UUID.randomUUID();
         tripId = UUID.randomUUID();
@@ -227,5 +233,13 @@ class AiItineraryServiceTest {
                   }
                 }
                 """;
+    }
+
+    private TripCacheService cacheService() {
+        return new TripCacheService(new ConcurrentMapCacheManager(
+                TripCacheNames.TRIP_BY_ID,
+                TripCacheNames.TRIP_LISTS,
+                TripCacheNames.PLACE_RESOLUTIONS
+        ));
     }
 }

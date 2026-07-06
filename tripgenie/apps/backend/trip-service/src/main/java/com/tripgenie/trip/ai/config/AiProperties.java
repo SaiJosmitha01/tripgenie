@@ -10,6 +10,7 @@ public record AiProperties(
         String apiKey,
         String model,
         int maxAttempts,
+        int retryAttempts,
         Duration connectTimeout,
         Duration readTimeout
 ) {
@@ -17,6 +18,7 @@ public record AiProperties(
         baseUrl = valueOrDefault(baseUrl, "https://api.groq.com/openai/v1");
         model = valueOrDefault(model, "llama-3.3-70b-versatile");
         maxAttempts = maxAttempts < 1 ? 2 : maxAttempts;
+        retryAttempts = retryAttempts < 1 ? 2 : retryAttempts;
         connectTimeout = connectTimeout == null ? Duration.ofSeconds(5) : connectTimeout;
         readTimeout = readTimeout == null ? Duration.ofSeconds(60) : readTimeout;
     }

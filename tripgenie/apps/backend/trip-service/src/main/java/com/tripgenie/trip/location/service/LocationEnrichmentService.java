@@ -2,6 +2,7 @@ package com.tripgenie.trip.location.service;
 
 import com.tripgenie.common.exception.BusinessException;
 import com.tripgenie.common.exception.NotFoundException;
+import com.tripgenie.trip.cache.TripCacheService;
 import com.tripgenie.trip.domain.ItineraryItem;
 import com.tripgenie.trip.domain.Trip;
 import com.tripgenie.trip.dto.LocationEnrichmentItemResponse;
@@ -11,6 +12,8 @@ import com.tripgenie.trip.location.dto.PlaceResolution;
 import com.tripgenie.trip.location.provider.MapsProvider;
 import com.tripgenie.trip.mapper.TripMapper;
 import com.tripgenie.trip.repository.TripRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,15 +28,24 @@ public class LocationEnrichmentService {
     private final TripRepository tripRepository;
     private final MapsProvider mapsProvider;
     private final TripMapper tripMapper;
+    private final TripCacheService tripCacheService;
+    private final MeterRegistry meterRegistry;
 
-    public LocationEnrichmentService(TripRepository tripRepository, MapsProvider mapsProvider, TripMapper tripMapper) {
+    public LocationEnrichmentService(TripRepository tripRepository,
+                                     MapsProvider mapsProvider,
+                                     TripMapper tripMapper,
+                                     TripCacheService tripCacheService,
+                                     MeterRegistry meterRegistry) {
         this.tripRepository = tripRepository;
         this.mapsProvider = mapsProvider;
         this.tripMapper = tripMapper;
+        this.tripCacheService = tripCacheService;
+        this.meterRegistry = meterRegistry;
     }
 
     @Transactional
     public LocationEnrichmentResponse enrichTrip(UUID userId, UUID tripId) {
+        Timer.Sample sample = Timer.start(meterRegistry);
         Trip trip = findOwnedTrip(userId, tripId);
         List<ItineraryItem> items = trip.getItineraryDays().stream()
                 .flatMap(day -> day.getItems().stream())
@@ -51,7 +63,10 @@ public class LocationEnrichmentService {
                 continue;
             }
             attempted++;
-            Optional<PlaceResolution> resolution = mapsProvider.resolvePlace(query);
+            Optional<PlaceResolution> resolution = tripCacheService.resolvePlace(
+                    query,
+                    () -> mapsProvider.resolvePlace(query)
+            );
             if (resolution.isEmpty()) {
                 responses.add(new LocationEnrichmentItemResponse(
                         item.getId(), query, false, tripMapper.toLocationMetadataResponse(item),
@@ -65,8 +80,13 @@ public class LocationEnrichmentService {
         }
 
         tripRepository.save(trip);
-        return new LocationEnrichmentResponse(
+        tripCacheService.evictTrip(userId, tripId);
+        LocationEnrichmentResponse response = new LocationEnrichmentResponse(
                 trip.getId(), items.size(), attempted, enriched, mapsProvider.providerName(), responses);
+        sample.stop(Timer.builder("tripgenie.maps.enrichment")
+                .tag("provider", mapsProvider.providerName())
+                .register(meterRegistry));
+        return response;
     }
 
     private Trip findOwnedTrip(UUID userId, UUID tripId) {

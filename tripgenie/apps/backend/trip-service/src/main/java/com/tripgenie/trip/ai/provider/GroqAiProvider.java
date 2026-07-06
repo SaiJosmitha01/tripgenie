@@ -5,10 +5,14 @@ import com.tripgenie.common.exception.BusinessException;
 import com.tripgenie.trip.ai.config.AiProperties;
 import com.tripgenie.trip.ai.dto.AiGenerationContext;
 import com.tripgenie.trip.ai.dto.AiProviderResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -16,6 +20,7 @@ import java.util.List;
 
 @Component
 public class GroqAiProvider implements AiProvider {
+    private static final Logger log = LoggerFactory.getLogger(GroqAiProvider.class);
     private static final String PROVIDER = "groq";
     private static final String SYSTEM_PROMPT = """
             You are TripGenie's itinerary planning engine. Return only one valid JSON object with no markdown.
@@ -75,25 +80,36 @@ public class GroqAiProvider implements AiProvider {
                 new ResponseFormat("json_object"),
                 0.3
         );
-        try {
-            GroqResponse response = restClient.post()
-                    .uri("/chat/completions")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .headers(headers -> headers.setBearerAuth(properties.apiKey()))
-                    .body(request)
-                    .retrieve()
-                    .body(GroqResponse.class);
-            if (response == null || response.choices() == null || response.choices().isEmpty()
-                    || response.choices().getFirst().message() == null
-                    || response.choices().getFirst().message().content() == null) {
-                throw providerFailure("Groq returned an empty completion");
+        for (int attempt = 1; attempt <= properties.retryAttempts(); attempt++) {
+            try {
+                GroqResponse response = restClient.post()
+                        .uri("/chat/completions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .headers(headers -> headers.setBearerAuth(properties.apiKey()))
+                        .body(request)
+                        .retrieve()
+                        .body(GroqResponse.class);
+                if (response == null || response.choices() == null || response.choices().isEmpty()
+                        || response.choices().getFirst().message() == null
+                        || response.choices().getFirst().message().content() == null) {
+                    throw providerFailure("Groq returned an empty completion");
+                }
+                return new AiProviderResponse(PROVIDER, properties.model(),
+                        response.choices().getFirst().message().content());
+            } catch (BusinessException exception) {
+                throw exception;
+            } catch (RestClientException exception) {
+                if (!isTransient(exception) || attempt == properties.retryAttempts()) {
+                    throw providerFailure("Groq itinerary generation failed");
+                }
+                log.atWarn()
+                        .addKeyValue("provider", PROVIDER)
+                        .addKeyValue("attempt", attempt)
+                        .addKeyValue("maxAttempts", properties.retryAttempts())
+                        .log("Transient AI provider failure; retrying");
             }
-            return new AiProviderResponse(PROVIDER, properties.model(), response.choices().getFirst().message().content());
-        } catch (BusinessException exception) {
-            throw exception;
-        } catch (RestClientException exception) {
-            throw providerFailure("Groq itinerary generation failed");
         }
+        throw providerFailure("Groq itinerary generation failed");
     }
 
     private String userPrompt(AiGenerationContext context) {
@@ -121,6 +137,17 @@ public class GroqAiProvider implements AiProvider {
 
     private BusinessException providerFailure(String message) {
         return new BusinessException("AI_PROVIDER_FAILURE", message, HttpStatus.BAD_GATEWAY);
+    }
+
+    private boolean isTransient(RestClientException exception) {
+        if (exception instanceof ResourceAccessException) {
+            return true;
+        }
+        if (exception instanceof HttpStatusCodeException statusException) {
+            return statusException.getStatusCode().is5xxServerError()
+                    || statusException.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS;
+        }
+        return false;
     }
 
     record GroqRequest(

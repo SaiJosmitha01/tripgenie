@@ -4,6 +4,7 @@ import com.tripgenie.trip.location.config.MapsProperties;
 import com.tripgenie.trip.location.dto.PlaceResolution;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
@@ -14,6 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.queryParam;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 
 class GoogleMapsProviderTest {
 
@@ -44,6 +46,7 @@ class GoogleMapsProviderTest {
         GoogleMapsProvider provider = new GoogleMapsProvider(builder.build(), new MapsProperties(
                 "https://maps.example.test",
                 "test-key",
+                2,
                 Duration.ofSeconds(1),
                 Duration.ofSeconds(1)
         ));
@@ -65,10 +68,35 @@ class GoogleMapsProviderTest {
         GoogleMapsProvider provider = new GoogleMapsProvider(RestClient.builder().build(), new MapsProperties(
                 "https://maps.example.test",
                 "",
+                2,
                 Duration.ofSeconds(1),
                 Duration.ofSeconds(1)
         ));
 
         assertThat(provider.resolvePlace("Louvre Museum")).isEmpty();
+    }
+
+    @Test
+    void retriesTransientServerFailure() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://maps.example.test");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://maps.example.test/maps/api/place/textsearch/json?query=Louvre%20Museum&key=test-key"))
+                .andRespond(withStatus(HttpStatus.BAD_GATEWAY));
+        server.expect(requestTo("https://maps.example.test/maps/api/place/textsearch/json?query=Louvre%20Museum&key=test-key"))
+                .andRespond(withSuccess("""
+                        {"status":"OK","results":[{"name":"Louvre","formatted_address":"Paris"}]}
+                        """, MediaType.APPLICATION_JSON));
+        GoogleMapsProvider provider = new GoogleMapsProvider(builder.build(), new MapsProperties(
+                "https://maps.example.test",
+                "test-key",
+                2,
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(1)
+        ));
+
+        Optional<PlaceResolution> resolution = provider.resolvePlace("Louvre Museum");
+
+        assertThat(resolution).isPresent();
+        server.verify();
     }
 }

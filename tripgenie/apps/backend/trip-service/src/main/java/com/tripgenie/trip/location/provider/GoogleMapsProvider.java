@@ -4,7 +4,11 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.tripgenie.common.exception.BusinessException;
 import com.tripgenie.trip.location.config.MapsProperties;
 import com.tripgenie.trip.location.dto.PlaceResolution;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -13,6 +17,7 @@ import java.util.List;
 import java.util.Optional;
 
 public class GoogleMapsProvider implements MapsProvider {
+    private static final Logger log = LoggerFactory.getLogger(GoogleMapsProvider.class);
     private static final String PROVIDER = "google";
     private static final String OK = "OK";
     private static final String ZERO_RESULTS = "ZERO_RESULTS";
@@ -38,20 +43,31 @@ public class GoogleMapsProvider implements MapsProvider {
         if (query == null || query.isBlank()) {
             return Optional.empty();
         }
-        try {
-            GoogleTextSearchResponse response = restClient.get()
-                    .uri(uriBuilder -> uriBuilder
-                            .path("/maps/api/place/textsearch/json")
-                            .queryParam("query", query.trim())
-                            .queryParam("key", properties.apiKey())
-                            .build())
-                    .retrieve()
-                    .body(GoogleTextSearchResponse.class);
-            return toPlaceResolution(response);
-        } catch (RestClientException exception) {
-            throw new BusinessException("MAPS_PROVIDER_FAILURE",
-                    "Google Maps place resolution failed", HttpStatus.BAD_GATEWAY);
+        for (int attempt = 1; attempt <= properties.retryAttempts(); attempt++) {
+            try {
+                GoogleTextSearchResponse response = restClient.get()
+                        .uri(uriBuilder -> uriBuilder
+                                .path("/maps/api/place/textsearch/json")
+                                .queryParam("query", query.trim())
+                                .queryParam("key", properties.apiKey())
+                                .build())
+                        .retrieve()
+                        .body(GoogleTextSearchResponse.class);
+                return toPlaceResolution(response);
+            } catch (RestClientException exception) {
+                if (!isTransient(exception) || attempt == properties.retryAttempts()) {
+                    throw new BusinessException("MAPS_PROVIDER_FAILURE",
+                            "Google Maps place resolution failed", HttpStatus.BAD_GATEWAY);
+                }
+                log.atWarn()
+                        .addKeyValue("provider", PROVIDER)
+                        .addKeyValue("attempt", attempt)
+                        .addKeyValue("maxAttempts", properties.retryAttempts())
+                        .log("Transient Maps provider failure; retrying");
+            }
         }
+        throw new BusinessException("MAPS_PROVIDER_FAILURE",
+                "Google Maps place resolution failed", HttpStatus.BAD_GATEWAY);
     }
 
     private Optional<PlaceResolution> toPlaceResolution(GoogleTextSearchResponse response) {
@@ -76,6 +92,17 @@ public class GoogleMapsProvider implements MapsProvider {
                 first.placeId(),
                 first.rating()
         ));
+    }
+
+    private boolean isTransient(RestClientException exception) {
+        if (exception instanceof ResourceAccessException) {
+            return true;
+        }
+        if (exception instanceof HttpStatusCodeException statusException) {
+            return statusException.getStatusCode().is5xxServerError()
+                    || statusException.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS;
+        }
+        return false;
     }
 
     record GoogleTextSearchResponse(String status, List<GooglePlaceResult> results) {
