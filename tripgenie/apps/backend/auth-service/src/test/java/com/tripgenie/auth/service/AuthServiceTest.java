@@ -1,5 +1,6 @@
 package com.tripgenie.auth.service;
 
+import com.tripgenie.auth.audit.service.AuthAuditLogService;
 import com.tripgenie.auth.domain.Role;
 import com.tripgenie.auth.domain.User;
 import com.tripgenie.auth.repository.RoleRepository;
@@ -37,6 +38,8 @@ class AuthServiceTest {
     private RoleRepository roleRepository;
     @Mock
     private JwtTokenService jwtTokenService;
+    @Mock
+    private AuthAuditLogService auditLogService;
 
     private PasswordEncoder passwordEncoder;
     private AuthService authService;
@@ -44,7 +47,7 @@ class AuthServiceTest {
     @BeforeEach
     void setUp() {
         passwordEncoder = new BCryptPasswordEncoder();
-        authService = new AuthService(userRepository, roleRepository, passwordEncoder, jwtTokenService);
+        authService = new AuthService(userRepository, roleRepository, passwordEncoder, jwtTokenService, auditLogService);
     }
 
     @Test

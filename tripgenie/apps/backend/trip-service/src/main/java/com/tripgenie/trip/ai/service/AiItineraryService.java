@@ -4,6 +4,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tripgenie.common.exception.BusinessException;
 import com.tripgenie.common.exception.NotFoundException;
+import com.tripgenie.trip.audit.domain.AuditAction;
+import com.tripgenie.trip.audit.domain.AuditEntityType;
+import com.tripgenie.trip.audit.service.AuditLogService;
 import com.tripgenie.trip.ai.config.AiProperties;
 import com.tripgenie.trip.ai.dto.AiGenerationContext;
 import com.tripgenie.trip.ai.dto.AiItinerary;
@@ -27,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -42,6 +46,7 @@ public class AiItineraryService {
     private final TripEventPublisher tripEventPublisher;
     private final TripCacheService tripCacheService;
     private final MeterRegistry meterRegistry;
+    private final AuditLogService auditLogService;
 
     public AiItineraryService(
             TripRepository tripRepository,
@@ -54,7 +59,8 @@ public class AiItineraryService {
             AiProperties properties,
             TripEventPublisher tripEventPublisher,
             TripCacheService tripCacheService,
-            MeterRegistry meterRegistry
+            MeterRegistry meterRegistry,
+            AuditLogService auditLogService
     ) {
         this.tripRepository = tripRepository;
         this.generationRepository = generationRepository;
@@ -67,56 +73,68 @@ public class AiItineraryService {
         this.tripEventPublisher = tripEventPublisher;
         this.tripCacheService = tripCacheService;
         this.meterRegistry = meterRegistry;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional
     public GenerateItineraryResponse generate(UUID userId, UUID tripId, GenerateItineraryRequest request) {
-        Timer.Sample sample = Timer.start(meterRegistry);
-        Trip trip = findOwnedTrip(userId, tripId);
-        if (!trip.getItineraryDays().isEmpty() && !request.overwriteExisting()) {
-            throw new BusinessException("ITINERARY_ALREADY_EXISTS",
-                    "This trip already has an itinerary; set overwriteExisting=true to replace it",
-                    HttpStatus.CONFLICT);
-        }
-
-        AiGenerationContext context = context(trip, request);
-        AiProviderResponse providerResponse = null;
-        AiItinerary itinerary = null;
-        for (int attempt = 1; attempt <= properties.maxAttempts(); attempt++) {
-            providerResponse = aiProvider.generateItinerary(context);
-            try {
-                itinerary = responseValidator.parseAndValidate(providerResponse.rawContent(), context);
-                break;
-            } catch (AiItineraryResponseValidator.InvalidAiResponseException exception) {
-                if (attempt == properties.maxAttempts()) {
-                    throw new BusinessException("AI_RESPONSE_INVALID",
-                            "AI returned an invalid itinerary after " + attempt + " attempts", HttpStatus.BAD_GATEWAY);
-                }
-                context = context.withPreviousInvalidResponse(providerResponse.rawContent());
+        try {
+            Timer.Sample sample = Timer.start(meterRegistry);
+            Trip trip = findOwnedTrip(userId, tripId);
+            if (!trip.getItineraryDays().isEmpty() && !request.overwriteExisting()) {
+                throw new BusinessException("ITINERARY_ALREADY_EXISTS",
+                        "This trip already has an itinerary; set overwriteExisting=true to replace it",
+                        HttpStatus.CONFLICT);
             }
-        }
 
-        trip.replaceItinerary(normalizer.toDays(itinerary));
-        if (itinerary.budget() != null && trip.getBudget() == null) {
-            trip.setBudget(normalizer.toBudget(itinerary.budget()));
-        } else if (itinerary.budget() != null && request.overwriteExisting()) {
-            normalizer.applyBudget(trip.getBudget(), itinerary.budget());
-        }
-        Trip savedTrip = tripRepository.save(trip);
+            AiGenerationContext context = context(trip, request);
+            AiProviderResponse providerResponse = null;
+            AiItinerary itinerary = null;
+            for (int attempt = 1; attempt <= properties.maxAttempts(); attempt++) {
+                providerResponse = aiProvider.generateItinerary(context);
+                try {
+                    itinerary = responseValidator.parseAndValidate(providerResponse.rawContent(), context);
+                    break;
+                } catch (AiItineraryResponseValidator.InvalidAiResponseException exception) {
+                    if (attempt == properties.maxAttempts()) {
+                        throw new BusinessException("AI_RESPONSE_INVALID",
+                                "AI returned an invalid itinerary after " + attempt + " attempts", HttpStatus.BAD_GATEWAY);
+                    }
+                    context = context.withPreviousInvalidResponse(providerResponse.rawContent());
+                }
+            }
 
-        AiItineraryGeneration generation = generation(providerResponse, itinerary, savedTrip);
-        AiItineraryGeneration savedGeneration = generationRepository.save(generation);
-        tripEventPublisher.publishItineraryGenerated(savedTrip, savedGeneration);
-        tripCacheService.evictTrip(userId, tripId);
-        GenerateItineraryResponse response = new GenerateItineraryResponse(
-                savedGeneration.getId(), savedGeneration.getProvider(), savedGeneration.getModel(),
-                savedGeneration.getConfidence(), itinerary.quality().warnings(), savedGeneration.getGeneratedAt(),
-                tripMapper.toResponse(savedTrip));
-        sample.stop(Timer.builder("tripgenie.ai.itinerary.generation")
-                .tag("provider", savedGeneration.getProvider())
-                .tag("model", savedGeneration.getModel())
-                .register(meterRegistry));
-        return response;
+            trip.replaceItinerary(normalizer.toDays(itinerary));
+            if (itinerary.budget() != null && trip.getBudget() == null) {
+                trip.setBudget(normalizer.toBudget(itinerary.budget()));
+            } else if (itinerary.budget() != null && request.overwriteExisting()) {
+                normalizer.applyBudget(trip.getBudget(), itinerary.budget());
+            }
+            Trip savedTrip = tripRepository.save(trip);
+
+            AiItineraryGeneration generation = generation(providerResponse, itinerary, savedTrip);
+            AiItineraryGeneration savedGeneration = generationRepository.save(generation);
+            tripEventPublisher.publishItineraryGenerated(savedTrip, savedGeneration);
+            tripCacheService.evictTrip(userId, tripId);
+            GenerateItineraryResponse response = new GenerateItineraryResponse(
+                    savedGeneration.getId(), savedGeneration.getProvider(), savedGeneration.getModel(),
+                    savedGeneration.getConfidence(), itinerary.quality().warnings(), savedGeneration.getGeneratedAt(),
+                    tripMapper.toResponse(savedTrip));
+            sample.stop(Timer.builder("tripgenie.ai.itinerary.generation")
+                    .tag("provider", savedGeneration.getProvider())
+                    .tag("model", savedGeneration.getModel())
+                    .register(meterRegistry));
+            auditLogService.recordSuccess(userId, AuditAction.ITINERARY_GENERATED, AuditEntityType.AI_GENERATION,
+                    savedGeneration.getId(), Map.of(
+                            "tripId", tripId,
+                            "provider", savedGeneration.getProvider(),
+                            "model", savedGeneration.getModel()));
+            return response;
+        } catch (RuntimeException exception) {
+            auditLogService.recordFailure(userId, AuditAction.ITINERARY_GENERATED, AuditEntityType.TRIP,
+                    tripId, failureMetadata(exception));
+            throw exception;
+        }
     }
 
     private Trip findOwnedTrip(UUID userId, UUID tripId) {
@@ -157,5 +175,16 @@ public class AiItineraryService {
 
     private String trimToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private Map<String, ?> failureMetadata(RuntimeException exception) {
+        if (exception instanceof BusinessException businessException) {
+            return Map.of("errorCode", businessException.getCode(), "message", message(exception));
+        }
+        return Map.of("error", exception.getClass().getSimpleName(), "message", message(exception));
+    }
+
+    private String message(RuntimeException exception) {
+        return exception.getMessage() == null ? "" : exception.getMessage();
     }
 }

@@ -2,6 +2,9 @@ package com.tripgenie.trip.location.service;
 
 import com.tripgenie.common.exception.BusinessException;
 import com.tripgenie.common.exception.NotFoundException;
+import com.tripgenie.trip.audit.domain.AuditAction;
+import com.tripgenie.trip.audit.domain.AuditEntityType;
+import com.tripgenie.trip.audit.service.AuditLogService;
 import com.tripgenie.trip.cache.TripCacheService;
 import com.tripgenie.trip.domain.ItineraryItem;
 import com.tripgenie.trip.domain.Trip;
@@ -20,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -30,63 +34,78 @@ public class LocationEnrichmentService {
     private final TripMapper tripMapper;
     private final TripCacheService tripCacheService;
     private final MeterRegistry meterRegistry;
+    private final AuditLogService auditLogService;
 
     public LocationEnrichmentService(TripRepository tripRepository,
                                      MapsProvider mapsProvider,
                                      TripMapper tripMapper,
                                      TripCacheService tripCacheService,
-                                     MeterRegistry meterRegistry) {
+                                     MeterRegistry meterRegistry,
+                                     AuditLogService auditLogService) {
         this.tripRepository = tripRepository;
         this.mapsProvider = mapsProvider;
         this.tripMapper = tripMapper;
         this.tripCacheService = tripCacheService;
         this.meterRegistry = meterRegistry;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional
     public LocationEnrichmentResponse enrichTrip(UUID userId, UUID tripId) {
-        Timer.Sample sample = Timer.start(meterRegistry);
-        Trip trip = findOwnedTrip(userId, tripId);
-        List<ItineraryItem> items = trip.getItineraryDays().stream()
-                .flatMap(day -> day.getItems().stream())
-                .toList();
+        try {
+            Timer.Sample sample = Timer.start(meterRegistry);
+            Trip trip = findOwnedTrip(userId, tripId);
+            List<ItineraryItem> items = trip.getItineraryDays().stream()
+                    .flatMap(day -> day.getItems().stream())
+                    .toList();
 
-        List<LocationEnrichmentItemResponse> responses = new ArrayList<>();
-        int attempted = 0;
-        int enriched = 0;
-        for (ItineraryItem item : items) {
-            String query = queryFor(item);
-            if (query == null) {
+            List<LocationEnrichmentItemResponse> responses = new ArrayList<>();
+            int attempted = 0;
+            int enriched = 0;
+            for (ItineraryItem item : items) {
+                String query = queryFor(item);
+                if (query == null) {
+                    responses.add(new LocationEnrichmentItemResponse(
+                            item.getId(), null, false, tripMapper.toLocationMetadataResponse(item),
+                            "No place name available"));
+                    continue;
+                }
+                attempted++;
+                Optional<PlaceResolution> resolution = tripCacheService.resolvePlace(
+                        query,
+                        () -> mapsProvider.resolvePlace(query)
+                );
+                if (resolution.isEmpty()) {
+                    responses.add(new LocationEnrichmentItemResponse(
+                            item.getId(), query, false, tripMapper.toLocationMetadataResponse(item),
+                            "No matching place found"));
+                    continue;
+                }
+                applyResolution(item, resolution.get());
+                enriched++;
                 responses.add(new LocationEnrichmentItemResponse(
-                        item.getId(), null, false, tripMapper.toLocationMetadataResponse(item),
-                        "No place name available"));
-                continue;
+                        item.getId(), query, true, toResponse(resolution.get()), "Location enriched"));
             }
-            attempted++;
-            Optional<PlaceResolution> resolution = tripCacheService.resolvePlace(
-                    query,
-                    () -> mapsProvider.resolvePlace(query)
-            );
-            if (resolution.isEmpty()) {
-                responses.add(new LocationEnrichmentItemResponse(
-                        item.getId(), query, false, tripMapper.toLocationMetadataResponse(item),
-                        "No matching place found"));
-                continue;
-            }
-            applyResolution(item, resolution.get());
-            enriched++;
-            responses.add(new LocationEnrichmentItemResponse(
-                    item.getId(), query, true, toResponse(resolution.get()), "Location enriched"));
+
+            tripRepository.save(trip);
+            tripCacheService.evictTrip(userId, tripId);
+            LocationEnrichmentResponse response = new LocationEnrichmentResponse(
+                    trip.getId(), items.size(), attempted, enriched, mapsProvider.providerName(), responses);
+            sample.stop(Timer.builder("tripgenie.maps.enrichment")
+                    .tag("provider", mapsProvider.providerName())
+                    .register(meterRegistry));
+            auditLogService.recordSuccess(userId, AuditAction.LOCATIONS_ENRICHED,
+                    AuditEntityType.LOCATION_ENRICHMENT, tripId, Map.of(
+                            "totalItems", items.size(),
+                            "attemptedItems", attempted,
+                            "enrichedItems", enriched,
+                            "provider", mapsProvider.providerName()));
+            return response;
+        } catch (RuntimeException exception) {
+            auditLogService.recordFailure(userId, AuditAction.LOCATIONS_ENRICHED,
+                    AuditEntityType.LOCATION_ENRICHMENT, tripId, failureMetadata(exception));
+            throw exception;
         }
-
-        tripRepository.save(trip);
-        tripCacheService.evictTrip(userId, tripId);
-        LocationEnrichmentResponse response = new LocationEnrichmentResponse(
-                trip.getId(), items.size(), attempted, enriched, mapsProvider.providerName(), responses);
-        sample.stop(Timer.builder("tripgenie.maps.enrichment")
-                .tag("provider", mapsProvider.providerName())
-                .register(meterRegistry));
-        return response;
     }
 
     private Trip findOwnedTrip(UUID userId, UUID tripId) {
@@ -130,5 +149,16 @@ public class LocationEnrichmentService {
 
     private String valueOrFallback(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private Map<String, ?> failureMetadata(RuntimeException exception) {
+        if (exception instanceof BusinessException businessException) {
+            return Map.of("errorCode", businessException.getCode(), "message", message(exception));
+        }
+        return Map.of("error", exception.getClass().getSimpleName(), "message", message(exception));
+    }
+
+    private String message(RuntimeException exception) {
+        return exception.getMessage() == null ? "" : exception.getMessage();
     }
 }

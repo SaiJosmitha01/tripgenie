@@ -2,6 +2,7 @@ package com.tripgenie.trip.ai.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tripgenie.common.exception.BusinessException;
+import com.tripgenie.trip.audit.service.AuditLogService;
 import com.tripgenie.trip.ai.config.AiProperties;
 import com.tripgenie.trip.ai.dto.AiProviderResponse;
 import com.tripgenie.trip.ai.dto.GenerateItineraryRequest;
@@ -54,6 +55,8 @@ class AiItineraryServiceTest {
     private AiProvider aiProvider;
     @Mock
     private TripEventPublisher tripEventPublisher;
+    @Mock
+    private AuditLogService auditLogService;
 
     private AiItineraryService service;
     private UUID ownerId;
@@ -77,7 +80,8 @@ class AiItineraryServiceTest {
                 properties,
                 tripEventPublisher,
                 cacheService(),
-                new SimpleMeterRegistry()
+                new SimpleMeterRegistry(),
+                auditLogService
         );
         ownerId = UUID.randomUUID();
         tripId = UUID.randomUUID();

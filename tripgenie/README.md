@@ -116,6 +116,29 @@ Useful local trip-service health and metrics endpoints:
 
 The trip service emits Micrometer timers for trip CRUD operations, AI itinerary generation, and Google Maps enrichment.
 
+## Admin Audit and Dashboard APIs
+
+Trip service exposes admin-only operational APIs:
+
+- `GET /admin/audit-logs`: paginated audit log search
+- `GET /admin/audit-logs/{id}`: single audit log lookup
+- `GET /admin/dashboard/summary`: operational counts and recent failures
+
+Audit log search supports these optional query parameters:
+
+- `action`: one of `USER_REGISTERED`, `LOGIN_SUCCESS`, `LOGIN_FAILURE`, `TRIP_CREATED`, `TRIP_UPDATED`, `TRIP_DELETED`, `ITINERARY_GENERATED`, `LOCATIONS_ENRICHED`, `NOTIFICATION_PROCESSED`
+- `userId`: user UUID
+- `entityType`: one of `USER`, `TRIP`, `AI_GENERATION`, `LOCATION_ENRICHMENT`, `NOTIFICATION`
+- `from` / `to`: ISO-8601 timestamps
+- `status`: `SUCCESS` or `FAILURE`
+- `page` / `size`: zero-based pagination, default `0` and `20`
+
+Admin endpoints require a JWT with `ADMIN` role. A JWT with only `USER` role is denied for `/admin/**`; existing user-facing APIs keep their current `USER` role behavior.
+
+Audit rows include user id, action type, entity type, entity id, timestamp, status, correlation id, and optional JSON metadata. Trip service records trip create/update/delete, AI itinerary generation, location enrichment, and processed notification events. Auth service writes registration and login success/failure audit rows using the same `audit_logs` table shape.
+
+The dashboard summary returns total trips, total AI itinerary generations, total successful location enrichment operations, total processed notification events, and the 10 most recent failed audit records.
+
 ## Event-Driven Notifications
 
 TripGenie uses Kafka for trip and itinerary notification events.
