@@ -1,6 +1,7 @@
 package com.tripgenie.trip.service;
 
 import com.tripgenie.common.exception.BusinessException;
+import com.tripgenie.trip.audit.service.AuditLogService;
 import com.tripgenie.trip.cache.TripCacheNames;
 import com.tripgenie.trip.cache.TripCacheService;
 import com.tripgenie.trip.domain.Trip;
@@ -52,6 +53,8 @@ class TripServiceTest {
     private TripRepository tripRepository;
     @Mock
     private TripEventPublisher tripEventPublisher;
+    @Mock
+    private AuditLogService auditLogService;
 
     private TripService tripService;
     private UUID userId;
@@ -65,7 +68,8 @@ class TripServiceTest {
                 new TripMapper(),
                 tripEventPublisher,
                 cacheService(),
-                new SimpleMeterRegistry()
+                new SimpleMeterRegistry(),
+                auditLogService
         );
         userId = UUID.randomUUID();
         tripId = UUID.randomUUID();

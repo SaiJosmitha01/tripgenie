@@ -1,6 +1,7 @@
 package com.tripgenie.trip.location.service;
 
 import com.tripgenie.common.exception.BusinessException;
+import com.tripgenie.trip.audit.service.AuditLogService;
 import com.tripgenie.trip.cache.TripCacheNames;
 import com.tripgenie.trip.cache.TripCacheService;
 import com.tripgenie.trip.domain.ItineraryDay;
@@ -37,6 +38,8 @@ class LocationEnrichmentServiceTest {
     private TripRepository tripRepository;
     @Mock
     private MapsProvider mapsProvider;
+    @Mock
+    private AuditLogService auditLogService;
 
     private LocationEnrichmentService service;
     private UUID userId;
@@ -51,7 +54,8 @@ class LocationEnrichmentServiceTest {
                 mapsProvider,
                 new TripMapper(),
                 cacheService(),
-                new SimpleMeterRegistry()
+                new SimpleMeterRegistry(),
+                auditLogService
         );
         userId = UUID.randomUUID();
         tripId = UUID.randomUUID();
