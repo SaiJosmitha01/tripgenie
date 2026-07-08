@@ -13,6 +13,7 @@ public record ItineraryItemResponse(
         LocalTime startTime,
         LocalTime endTime,
         BigDecimal estimatedCost,
-        String bookingReference
+        String bookingReference,
+        LocationMetadataResponse locationMetadata
 ) {
 }

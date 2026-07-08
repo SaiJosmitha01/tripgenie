@@ -5,6 +5,7 @@ import com.tripgenie.trip.ai.config.AiProperties;
 import com.tripgenie.trip.ai.dto.AiGenerationContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -19,6 +20,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 
 class GroqAiProviderTest {
 
@@ -26,7 +28,7 @@ class GroqAiProviderTest {
     void callsOpenAiCompatibleEndpointInJsonMode() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://groq.test/openai/v1");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        AiProperties properties = new AiProperties(null, "secret-test-key", null, 2,
+        AiProperties properties = new AiProperties(null, "secret-test-key", null, 2, 2,
                 Duration.ofSeconds(1), Duration.ofSeconds(1));
         GroqAiProvider provider = new GroqAiProvider(builder.build(), properties);
         server.expect(requestTo("https://groq.test/openai/v1/chat/completions"))
@@ -46,12 +48,32 @@ class GroqAiProviderTest {
 
     @Test
     void failsSafelyWhenApiKeyIsMissing() {
-        AiProperties properties = new AiProperties(null, "", null, 2,
+        AiProperties properties = new AiProperties(null, "", null, 2, 2,
                 Duration.ofSeconds(1), Duration.ofSeconds(1));
         GroqAiProvider provider = new GroqAiProvider(RestClient.create(), properties);
         assertThatThrownBy(() -> provider.generateItinerary(context()))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getCode()).isEqualTo("AI_PROVIDER_NOT_CONFIGURED"));
+    }
+
+    @Test
+    void retriesTransientServerFailure() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://groq.test/openai/v1");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AiProperties properties = new AiProperties(null, "secret-test-key", null, 2, 2,
+                Duration.ofSeconds(1), Duration.ofSeconds(1));
+        GroqAiProvider provider = new GroqAiProvider(builder.build(), properties);
+        server.expect(requestTo("https://groq.test/openai/v1/chat/completions"))
+                .andRespond(withStatus(HttpStatus.BAD_GATEWAY));
+        server.expect(requestTo("https://groq.test/openai/v1/chat/completions"))
+                .andRespond(withSuccess("""
+                        {"choices":[{"message":{"role":"assistant","content":"{\\"itinerary_days\\":[]}"}}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        var response = provider.generateItinerary(context());
+
+        assertThat(response.rawContent()).isEqualTo("{\"itinerary_days\":[]}");
+        server.verify();
     }
 
     private AiGenerationContext context() {

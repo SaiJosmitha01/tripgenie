@@ -19,6 +19,23 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.add.type.headers: true
+    admin:
+      auto-create: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: ${REDIS_TIMEOUT:2s}
+  cache:
+    type: redis
 
 server:
   port: 8083
@@ -32,6 +49,12 @@ management:
     health:
       probes:
         enabled: true
+      show-details: when_authorized
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState,db,redis,kafka
 
 springdoc:
   swagger-ui:
@@ -43,8 +66,19 @@ tripgenie:
     api-key: ${GROQ_API_KEY:}
     model: ${GROQ_MODEL:llama-3.3-70b-versatile}
     max-attempts: ${AI_MAX_ATTEMPTS:2}
+    retry-attempts: ${AI_RETRY_ATTEMPTS:2}
     connect-timeout: ${AI_CONNECT_TIMEOUT:5s}
     read-timeout: ${AI_READ_TIMEOUT:60s}
+  maps:
+    base-url: ${GOOGLE_MAPS_BASE_URL:https://maps.googleapis.com}
+    api-key: ${GOOGLE_MAPS_API_KEY:}
+    retry-attempts: ${GOOGLE_MAPS_RETRY_ATTEMPTS:2}
+    connect-timeout: ${GOOGLE_MAPS_CONNECT_TIMEOUT:5s}
+    read-timeout: ${GOOGLE_MAPS_READ_TIMEOUT:20s}
+  cache:
+    trip-ttl: ${TRIP_CACHE_TTL:10m}
+    trip-list-ttl: ${TRIP_LIST_CACHE_TTL:5m}
+    place-resolution-ttl: ${PLACE_RESOLUTION_CACHE_TTL:7d}
   security:
     jwt:
       issuer: tripgenie
@@ -52,6 +86,8 @@ tripgenie:
       access-token-ttl: PT2H
 
 logging:
+  pattern:
+    level: "%5p [correlationId:%X{correlationId:-}]"
   level:
     root: INFO
     com.tripgenie: INFO
