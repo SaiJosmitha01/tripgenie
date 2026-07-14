@@ -1,0 +1,16 @@
+.git
+.github
+.idea
+.vscode
+.codex
+.agents
+**/target
+**/node_modules
+apps/frontend/dist
+*.log
+.env
+.env.*
+!.env.example
+README.md
+docs
+infra/k8s

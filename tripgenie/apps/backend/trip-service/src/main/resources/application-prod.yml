@@ -2,3 +2,42 @@ spring:
   config:
     activate:
       on-profile: prod
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:}
+    username: ${SPRING_DATASOURCE_USERNAME:}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+  cache:
+    type: none
+  data:
+    redis:
+      url: ${REDIS_URL:}
+      timeout: ${REDIS_TIMEOUT:2s}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:}
+    admin:
+      auto-create: false
+
+server:
+  port: ${PORT:8083}
+
+management:
+  health:
+    redis:
+      enabled: ${REDIS_HEALTH_ENABLED:false}
+  endpoint:
+    health:
+      show-details: never
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState,db
+
+tripgenie:
+  cache:
+    enabled: ${CACHE_ENABLED:false}
+  kafka:
+    enabled: ${KAFKA_ENABLED:false}
+  security:
+    jwt:
+      secret: ${JWT_SECRET}

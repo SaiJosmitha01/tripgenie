@@ -5,12 +5,14 @@ import com.tripgenie.common.event.NotificationEvent;
 import com.tripgenie.trip.audit.domain.AuditAction;
 import com.tripgenie.trip.audit.domain.AuditEntityType;
 import com.tripgenie.trip.audit.service.AuditLogService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
 @Component
+@ConditionalOnProperty(prefix = "tripgenie.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class NotificationAuditListener {
     private final AuditLogService auditLogService;
 

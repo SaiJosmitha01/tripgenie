@@ -17,6 +17,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class NotificationServiceTest {
@@ -29,7 +30,7 @@ class NotificationServiceTest {
 
     @BeforeEach
     void setUp() {
-        notificationService = new NotificationService(emailService, kafkaTemplate);
+        notificationService = new NotificationService(emailService, kafkaTemplate, true);
     }
 
     @Test
@@ -58,5 +59,29 @@ class NotificationServiceTest {
         NotificationEvent notification = (NotificationEvent) notificationCaptor.getValue();
         assertThat(notification.sourceEventId()).isEqualTo(event.eventId());
         assertThat(notification.notificationType()).isEqualTo("TRIP_CREATED");
+    }
+
+    @Test
+    void sendsEmailWithoutPublishingWhenKafkaIsDisabled() {
+        notificationService = new NotificationService(emailService, kafkaTemplate, false);
+        UUID ownerId = UUID.randomUUID();
+        TripCreatedEvent event = new TripCreatedEvent(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                ownerId,
+                "Japan",
+                "Tokyo",
+                LocalDate.of(2026, 9, 1),
+                LocalDate.of(2026, 9, 7),
+                "DRAFT",
+                Instant.now()
+        );
+
+        notificationService.notifyTripCreated(event);
+
+        verify(emailService).sendEmail(org.mockito.Mockito.eq(ownerId),
+                org.mockito.Mockito.eq("Trip created: Japan"),
+                org.mockito.Mockito.contains("Tokyo"));
+        verifyNoInteractions(kafkaTemplate);
     }
 }

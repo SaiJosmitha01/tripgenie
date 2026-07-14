@@ -1,4 +1,9 @@
 spring:
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../../.env[.properties]
+      - optional:file:../../../.env[.properties]
   application:
     name: notification-service
   profiles:
@@ -22,7 +27,10 @@ server:
   port: 8085
 
 tripgenie:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:}
   kafka:
+    enabled: ${KAFKA_ENABLED:true}
     consumer-group: ${NOTIFICATION_KAFKA_GROUP:notification-service}
 
 management:
