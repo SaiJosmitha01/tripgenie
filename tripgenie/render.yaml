@@ -1,0 +1,103 @@
+databases:
+  - name: tripgenie-postgres
+    databaseName: tripgenie
+    user: tripgenie
+    plan: starter
+
+services:
+  - type: keyvalue
+    name: tripgenie-redis
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
+
+  - type: web
+    name: tripgenie-auth-service
+    runtime: docker
+    dockerfilePath: ./apps/backend/auth-service/Dockerfile
+    dockerContext: .
+    healthCheckPath: /actuator/health/readiness
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tripgenie-postgres
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+
+  - type: web
+    name: tripgenie-user-service
+    runtime: docker
+    dockerfilePath: ./apps/backend/user-service/Dockerfile
+    dockerContext: .
+    healthCheckPath: /actuator/health/readiness
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tripgenie-postgres
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+
+  - type: web
+    name: tripgenie-trip-service
+    runtime: docker
+    dockerfilePath: ./apps/backend/trip-service/Dockerfile
+    dockerContext: .
+    healthCheckPath: /actuator/health/readiness
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tripgenie-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: tripgenie-redis
+          property: connectionString
+      - key: CACHE_ENABLED
+        value: "true"
+      - key: REDIS_HEALTH_ENABLED
+        value: "true"
+      - key: KAFKA_ENABLED
+        value: "false"
+      - key: JWT_SECRET
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        sync: false
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+
+  - type: web
+    name: tripgenie-notification-service
+    runtime: docker
+    dockerfilePath: ./apps/backend/notification-service/Dockerfile
+    dockerContext: .
+    healthCheckPath: /actuator/health/readiness
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tripgenie-postgres
+          property: connectionString
+      - key: KAFKA_ENABLED
+        value: "false"
+      - key: NOTIFICATION_KAFKA_GROUP
+        value: notification-service
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false

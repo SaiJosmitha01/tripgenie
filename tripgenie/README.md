@@ -73,6 +73,98 @@ Validate the Compose file:
 docker compose -f infra/docker/docker-compose.yml config
 ```
 
+## Backend Configuration
+
+The default backend profile is `local`. Local development keeps localhost PostgreSQL, Redis, and Kafka defaults so the existing Docker Compose workflow continues to work.
+
+Production uses `SPRING_PROFILES_ACTIVE=prod` and reads cloud configuration from environment variables. Do not commit real secrets in `.env`, `.env.example`, `render.yaml`, or service YAML files.
+
+Required production variables:
+
+- `SPRING_PROFILES_ACTIVE=prod`
+- `JWT_SECRET`
+- `DATABASE_URL`, or `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, and `SPRING_DATASOURCE_PASSWORD`
+- `CORS_ALLOWED_ORIGINS`, set to the future React frontend origin
+
+Trip service also requires:
+
+- `GROQ_API_KEY`
+- `GROQ_MODEL`
+- `GOOGLE_MAPS_API_KEY`
+
+Optional production variables:
+
+- `REDIS_URL`
+- `CACHE_ENABLED`, defaults to `false` in prod for safe startup without Redis
+- `REDIS_HEALTH_ENABLED`, defaults to `false` in prod
+- `KAFKA_ENABLED`, defaults to `false` in prod
+- `KAFKA_BOOTSTRAP_SERVERS`
+- `NOTIFICATION_KAFKA_GROUP`
+- `TRIP_AUDIT_KAFKA_GROUP`
+
+Spring Boot uses Render's `PORT` variable in the `prod` profile. Local fallback ports are:
+
+- auth-service: `8081`
+- user-service: `8082`
+- trip-service: `8083`
+- notification-service: `8085`
+
+Deployment-friendly health checks:
+
+- `/actuator/health`
+- `/actuator/health/liveness`
+- `/actuator/health/readiness`
+- `/actuator/metrics`
+- `/actuator/prometheus`
+
+Actuator health, liveness, readiness, metrics, structured logging, and `X-Correlation-Id` support remain enabled. Production health details are not exposed.
+
+## Production Docker Images
+
+Build images from the repository root. Each Dockerfile builds only the required Maven module and dependencies, then copies the Spring Boot jar into a Java 21 runtime image that runs as a non-root user.
+
+```sh
+docker build -f apps/backend/auth-service/Dockerfile -t tripgenie-auth-service .
+docker build -f apps/backend/user-service/Dockerfile -t tripgenie-user-service .
+docker build -f apps/backend/trip-service/Dockerfile -t tripgenie-trip-service .
+docker build -f apps/backend/notification-service/Dockerfile -t tripgenie-notification-service .
+```
+
+## Render Preparation
+
+`render.yaml` is a deploy-later blueprint for backend services only. It does not deploy the frontend and should not be applied until the React frontend is complete and the final service topology is confirmed.
+
+The blueprint defines:
+
+- four backend Docker web services
+- one managed PostgreSQL database reference
+- one managed Render Key Value Redis-compatible reference for trip-service caching
+- health checks at `/actuator/health/readiness`
+- placeholder secret variables with `sync: false`
+- `KAFKA_ENABLED=false` by default because no broker is provisioned in the blueprint
+
+PostgreSQL can be configured with Render's `DATABASE_URL`. TripGenie converts `postgres://...` and `postgresql://...` URLs into JDBC datasource URLs at startup. Explicit Spring datasource variables still work and take precedence.
+
+Redis is optional in production. Set `REDIS_URL`, `CACHE_ENABLED=true`, and `REDIS_HEALTH_ENABLED=true` when Redis is provisioned. Leave caching disabled if Redis is not available.
+
+Kafka is optional in production. Local development keeps Kafka enabled by default. In production, leave `KAFKA_ENABLED=false` until a broker is configured; trip-service and notification-service will start without listeners, topic creation, or publish attempts.
+
+Future Confluent Cloud setup:
+
+- set `KAFKA_ENABLED=true`
+- set `KAFKA_BOOTSTRAP_SERVERS` to the Confluent bootstrap server list
+- add the required SASL/SSL Spring Kafka properties as environment variables
+- set `NOTIFICATION_KAFKA_GROUP` and `TRIP_AUDIT_KAFKA_GROUP`
+- keep retry and DLT behavior unchanged
+
+Future frontend deployment flow:
+
+- complete and build the React app
+- deploy the frontend separately
+- set `CORS_ALLOWED_ORIGINS` on each backend service to the frontend URL
+- configure frontend API base URLs for the backend service URLs
+- only then apply or adapt the Render backend blueprint
+
 ## Observability, Caching, and Resilience
 
 Trip service uses Redis-backed Spring caching for read-heavy backend paths:

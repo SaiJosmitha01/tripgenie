@@ -21,6 +21,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @ExtendWith(MockitoExtension.class)
 class TripEventPublisherTest {
@@ -32,7 +33,7 @@ class TripEventPublisherTest {
 
     @BeforeEach
     void setUp() {
-        publisher = new TripEventPublisher(kafkaTemplate);
+        publisher = new TripEventPublisher(kafkaTemplate, true);
         trip = new Trip();
         ReflectionTestUtils.setField(trip, "id", UUID.randomUUID());
         trip.setOwnerId(UUID.randomUUID());
@@ -83,5 +84,14 @@ class TripEventPublisherTest {
         ItineraryGeneratedEvent event = (ItineraryGeneratedEvent) eventCaptor.getValue();
         assertThat(event.generationId()).isEqualTo(generation.getId());
         assertThat(event.provider()).isEqualTo("groq");
+    }
+
+    @Test
+    void skipsPublishingWhenKafkaIsDisabled() {
+        publisher = new TripEventPublisher(kafkaTemplate, false);
+
+        publisher.publishTripCreated(trip);
+
+        verifyNoInteractions(kafkaTemplate);
     }
 }

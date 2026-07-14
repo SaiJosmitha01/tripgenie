@@ -5,7 +5,9 @@ import com.tripgenie.common.event.KafkaTopics;
 import com.tripgenie.common.event.NotificationEvent;
 import com.tripgenie.common.event.TripCreatedEvent;
 import com.tripgenie.common.event.TripUpdatedEvent;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -15,10 +17,14 @@ import java.util.UUID;
 public class NotificationService {
     private final EmailService emailService;
     private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final boolean kafkaEnabled;
 
-    public NotificationService(EmailService emailService, KafkaTemplate<String, Object> kafkaTemplate) {
+    public NotificationService(EmailService emailService,
+                               @Nullable KafkaTemplate<String, Object> kafkaTemplate,
+                               @Value("${tripgenie.kafka.enabled:true}") boolean kafkaEnabled) {
         this.emailService = emailService;
         this.kafkaTemplate = kafkaTemplate;
+        this.kafkaEnabled = kafkaEnabled;
     }
 
     public void notifyTripCreated(TripCreatedEvent event) {
@@ -43,6 +49,8 @@ public class NotificationService {
         NotificationEvent notification = new NotificationEvent(
                 UUID.randomUUID(), sourceEventId, userId, notificationType, subject, message, Instant.now());
         emailService.sendEmail(userId, subject, message);
-        kafkaTemplate.send(KafkaTopics.NOTIFICATIONS, userId.toString(), notification);
+        if (kafkaEnabled && kafkaTemplate != null) {
+            kafkaTemplate.send(KafkaTopics.NOTIFICATIONS, userId.toString(), notification);
+        }
     }
 }

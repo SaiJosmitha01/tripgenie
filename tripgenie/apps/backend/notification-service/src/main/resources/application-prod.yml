@@ -2,3 +2,32 @@ spring:
   config:
     activate:
       on-profile: prod
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:}
+    username: ${SPRING_DATASOURCE_USERNAME:}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:}
+    admin:
+      auto-create: false
+
+server:
+  port: ${PORT:8085}
+
+management:
+  endpoint:
+    health:
+      show-details: never
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState,db
+
+tripgenie:
+  kafka:
+    enabled: ${KAFKA_ENABLED:false}
