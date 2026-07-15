@@ -1,4 +1,4 @@
-CREATE TABLE ai_itinerary_generations (
+CREATE TABLE IF NOT EXISTS ai_itinerary_generations (
     id UUID PRIMARY KEY,
     trip_id UUID NOT NULL REFERENCES trips(id) ON DELETE CASCADE,
     provider VARCHAR(40) NOT NULL,
@@ -10,5 +10,5 @@ CREATE TABLE ai_itinerary_generations (
     CONSTRAINT ck_ai_itinerary_generation_confidence CHECK (confidence >= 0 AND confidence <= 1)
 );
 
-CREATE INDEX idx_ai_itinerary_generations_trip_generated
+CREATE INDEX IF NOT EXISTS idx_ai_itinerary_generations_trip_generated
     ON ai_itinerary_generations(trip_id, generated_at DESC);
