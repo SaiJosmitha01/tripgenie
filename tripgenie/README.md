@@ -227,7 +227,7 @@ Audit log search supports these optional query parameters:
 
 Admin endpoints require a JWT with `ADMIN` role. A JWT with only `USER` role is denied for `/admin/**`; existing user-facing APIs keep their current `USER` role behavior.
 
-Audit rows include user id, action type, entity type, entity id, timestamp, status, correlation id, and optional JSON metadata. Trip service records trip create/update/delete, AI itinerary generation, location enrichment, and processed notification events. Auth service writes registration and login success/failure audit rows using the same `audit_logs` table shape.
+Audit rows include user id, action type, entity type, entity id, timestamp, status, correlation id, and optional JSON metadata. Trip service records trip create/update/delete, AI itinerary generation, location enrichment, and processed notification events in `trip_audit_logs`. Auth service writes registration and login success/failure audit rows to `auth_audit_logs`. The service-specific tables keep the shared PostgreSQL schema from coupling the two audit persistence models.
 
 The dashboard summary returns total trips, total AI itinerary generations, total successful location enrichment operations, total processed notification events, and the 10 most recent failed audit records.
 

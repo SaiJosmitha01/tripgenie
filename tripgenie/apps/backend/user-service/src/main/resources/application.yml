@@ -15,6 +15,9 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+    table: flyway_schema_history_user
+    baseline-on-migrate: true
+    baseline-version: 0
 
 server:
   port: 8082
